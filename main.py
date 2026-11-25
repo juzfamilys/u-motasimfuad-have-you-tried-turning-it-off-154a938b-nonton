@@ -1,57 +1,100 @@
 #!/usr/bin/env python3
-"""Have You Tried Turning It Off? — make.fun entry.
+"""One button, four years, zero failures.
 
-Writes exactly one line of text to $MAKEFUN_OUTPUT_DIR/entry.txt
-(default /output), with no trailing newline.
+This script is the entry for the make.fun bounty "Have You Tried Turning
+It Off?". It produces a single text file holding exactly one sentence —
+no trailing newline, no extra bytes — and nothing else.
 
-Pure Python standard library only; deterministic output.
+Only the Python standard library is used, so it runs on vanilla Python.
 """
 
+import argparse
 import os
 import sys
 
-ENTRY = "My whole playbook is one button, and after four years of support tickets the restart has never once let me down."
+LINE = "My whole playbook is one button, and after four years of support tickets the restart has never once let me down."
 
-MAX_CHARS = 200
-
-
-def validate(text: str) -> None:
-    """Check the entry line before it is written."""
-    if not text:
-        raise ValueError("entry is empty")
-    if text != text.strip():
-        raise ValueError("entry has leading or trailing whitespace")
-    if "\n" in text or "\r" in text:
-        raise ValueError("entry must be a single line")
-    if len(text) > MAX_CHARS:
-        raise ValueError(f"entry is {len(text)} characters, over the {MAX_CHARS} limit")
-    if "  " in text:
-        raise ValueError("entry contains a double space")
-    if not text.endswith("."):
-        raise ValueError("entry must end with a period")
+CHAR_LIMIT = 200
+FILENAME = "entry.txt"
+DEFAULT_OUT = "/output"
 
 
-def main() -> int:
-    validate(ENTRY)
+def find_problems(line):
+    """Collect every rule the line breaks; an empty list means it is fine."""
+    problems = []
+    if line == "":
+        problems.append("line is blank")
+    if line != line.strip():
+        problems.append("line starts or ends with whitespace")
+    if "\n" in line or "\r" in line:
+        problems.append("line breaks across more than one line")
+    if len(line) > CHAR_LIMIT:
+        problems.append(
+            "line is %d characters long, over the %d limit" % (len(line), CHAR_LIMIT)
+        )
+    if "  " in line:
+        problems.append("line has two spaces in a row")
+    if not line.endswith("."):
+        problems.append("line does not end with a full stop")
+    return problems
 
-    output_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, "entry.txt")
 
-    data = ENTRY.encode("utf-8")
-    with open(path, "wb") as f:
-        f.write(data)
+def check_line(line):
+    """Raise if the line breaks any of the entry rules."""
+    problems = find_problems(line)
+    if problems:
+        raise ValueError("; ".join(problems))
 
-    # Read back and re-validate the exact bytes on disk.
-    with open(path, "rb") as f:
-        on_disk = f.read()
-    if on_disk != data:
-        raise ValueError("read-back mismatch: bytes on disk differ from entry")
-    validate(on_disk.decode("utf-8"))
 
-    print(f"wrote {len(data)} bytes to {path}")
+def resolve_target():
+    """Work out where entry.txt should land and make sure the folder exists."""
+    folder = os.environ.get("MAKEFUN_OUTPUT_DIR", DEFAULT_OUT)
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, FILENAME)
+
+
+def emit(line, path):
+    """Write the line as raw bytes, without appending a newline."""
+    payload = line.encode("utf-8")
+    with open(path, "wb") as handle:
+        handle.write(payload)
+    return payload
+
+
+def confirm_written(path, expected):
+    """Read the file back and insist the bytes match what we wrote."""
+    with open(path, "rb") as handle:
+        stored = handle.read()
+    if stored != expected:
+        raise ValueError(
+            "file on disk does not match the entry (%d bytes vs %d expected)"
+            % (len(stored), len(expected))
+        )
+    check_line(stored.decode("utf-8"))
+
+
+def run(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Write the one-line entry to entry.txt."
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="only validate the entry line, without writing any file",
+    )
+    args = parser.parse_args(argv)
+
+    check_line(LINE)
+    if args.check:
+        print("line OK: %d characters, no problems found" % len(LINE))
+        return 0
+
+    path = resolve_target()
+    payload = emit(LINE, path)
+    confirm_written(path, payload)
+    print("wrote %d bytes to %s" % (len(payload), path))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
